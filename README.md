@@ -13,3 +13,10 @@ WebApp Setup:
 1. Create symbolic link of web_app directory in $GOPATH/src.
 
         ln -s ~/Calyx/webrtc-server/web_app $GOPATH/src
+        
+Running server and web_app:
+---
+1. Run Server with this command:
+        
+        $GOPATH/bin/collidermain -port=8089 -tls=true -room-server=https://<your_ip>
+        
