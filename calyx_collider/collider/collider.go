@@ -19,6 +19,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"os"
 )
 
 const registerTimeoutSec = 10
@@ -126,10 +127,11 @@ func (c *Collider) httpHandler(w http.ResponseWriter, r *http.Request) {
 	case "DELETE":
 		c.roomTable.remove(rid, cid)
 	case "GET":
+		var basePath = os.Getenv("GOPATH") + "/src/web_app/";
 		if cid == "webrtc.js" {
-			http.ServeFile(w, r, "../src/web_app/webrtc.js")
+			http.ServeFile(w, r, basePath + "webrtc.js")
 		}
-		http.ServeFile(w, r, "../src/web_app/video_call.html")
+		http.ServeFile(w, r, basePath + "video_call.html")
 
 	default:
 		return
