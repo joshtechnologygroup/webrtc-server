@@ -8,61 +8,95 @@ window.SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecogn
 
 var config = {
   wssHost: 'wss://192.168.1.201:8089/ws'
-  // wssHost: 'wss://example.com/myWebSocket'
 };
 var CLOSE_CONNECTION_FLAG = "close connection";
-var clientId = Math.floor(Math.random() * 100) + 1;
-var localVideoElem = null, 
-  remoteVideoElem = null, 
-  localVideoStream = null,
-  videoCallButton = null,
-  registerButton = null,
-  endCallButton = null;
-var peerConn = null,
-  wsc = new WebSocket(config.wssHost),
-  peerConnCfg = {'iceServers':
-    [
-        {'url': 'stun:stun.l.google.com:19302'},
-        {
-            url: 'turn:192.158.29.39:3478?transport=tcp',
-            credential: 'JZEOEt2V3Qb0y27GRntt2u2PAYA=',
-            username: '28224511:1379330808'
-        }
-    ]
-  };
+var SEND_COMMAND = "send";
+var REGISTER_COMMAND = "register";
+
+var clientId = null;
+var roomId = null;
+var wsc = null;
+var peerConn = null;
+var localVideoElem = null;
+var remoteVideoElem = null;
+var localVideoStream = null;
+var videoCallButton = null;
+var endCallButton = null;
+
+function setUpWebSocket() {
+    wsc = new WebSocket(config.wssHost);
+    wsc.onmessage = webSocketMessageReceiver;
+}
+
+function getPeerConfig() {
+    return {'iceServers':
+        [
+            {'url': 'stun:stun.l.google.com:19302'},
+            {
+                url: 'turn:192.158.29.39:3478?transport=tcp',
+                credential: 'JZEOEt2V3Qb0y27GRntt2u2PAYA=',
+                username: '28224511:1379330808'
+            }
+        ]
+    };
+}
     
-function pageReady() {
+function testPageReady() {
   // check browser WebRTC availability 
   if(navigator.getUserMedia) {
     videoCallButton = document.getElementById("videoCallButton");
-    registerButton = document.getElementById("registerButton");
     endCallButton = document.getElementById("endCallButton");
     localVideoElem = document.getElementById('localVideo');
     remoteVideoElem = document.getElementById('remoteVideo');
-    registerButton.removeAttribute("disabled");
     videoCallButton.addEventListener("click", initiateCall);
-    registerButton.addEventListener("click", registerClient);
+    videoCallButton.removeAttribute("disabled");
+    setUpWebSocket();
+    wsc.onopen = function () {
+        registerClientInRoom("1", (Math.floor(Math.random() * 100) + 1).toString());
+    };
     endCallButton.addEventListener("click", endCall);
   } else {
     alert("Sorry, your browser does not support WebRTC!")
   }
 };
 
-function prepareCall() {
-  peerConn = new RTCPeerConnection(peerConnCfg);
-  // send any ice candidates to the other peer
-  peerConn.onicecandidate = onIceCandidateHandler;
-  // once remote stream arrives, show it in the remote video element
-  peerConn.onaddstream = onAddStreamHandler;
-};
-
-function registerClient() {
-    wsc.send(JSON.stringify({"cmd": "register", "roomid": "1", "clientid": clientId.toString(), "msg": "none"}));
-    videoCallButton.removeAttribute("disabled");
-    registerButton.setAttribute("disabled", true);
+/**
+ * This method does initial setup of client in room. This method must be called before any other method in this file.
+ *
+ * @param roomId Room in which call will take place. Group of people attending same call will be in same room.
+ * @param clientId Unique id of each person attending the call.
+ * @throws Error, If browser being used doesn't support WebRTC.
+ */
+function setupClient(roomId, clientId) {
+    if(navigator.getUserMedia) {
+        localVideoElem = document.getElementById('localVideo');
+        remoteVideoElem = document.getElementById('remoteVideo');
+        setUpWebSocket();
+        wsc.onopen = function () {
+            registerClientInRoom(roomId, clientId);
+        };
+    } else {
+        throw new Error("Browser does not support WebRTC");
+    }
 }
 
-// run start(true) to initiate a call
+function registerClientInRoom(roomName, clientIdString) {
+    roomId = roomName;
+    clientId = clientIdString;
+    sendWebSocketMsg(REGISTER_COMMAND, roomId, clientId, "none");
+}
+
+function prepareCall() {
+    peerConn = new RTCPeerConnection(getPeerConfig());
+    // send any ice candidates to the other peer
+    peerConn.onicecandidate = onIceCandidateHandler;
+    // once remote stream arrives, show it in the remote video element
+    peerConn.onaddstream = onAddStreamHandler;
+};
+
+/**
+ * This method starts video call. It must be called after setupClient.
+ */
 function initiateCall() {
   prepareCall();
   // get the local stream, show it in the local video element and send it
@@ -85,7 +119,7 @@ function answerCall() {
   }, function(error) { console.log(error);});
 };
 
-wsc.onmessage = function (evt) {
+function webSocketMessageReceiver(evt) {
   if (!peerConn) answerCall();
   var signal = JSON.parse(evt.data);
   var msg = JSON.parse(signal.msg);
@@ -108,7 +142,7 @@ function createAndSendOffer() {
       var off = new RTCSessionDescription(offer);
       peerConn.setLocalDescription(new RTCSessionDescription(off),
           function() {
-              wsc.send(JSON.stringify({"cmd": "send", "roomid": "1", "clientid": clientId.toString(), "msg": JSON.stringify(off) }));
+            sendWebSocketMsg(SEND_COMMAND, roomId, clientId, JSON.stringify(off));
           },
           function(error) { console.log(error);}
       );
@@ -123,7 +157,7 @@ function createAndSendAnswer() {
       var ans = new RTCSessionDescription(answer);
       peerConn.setLocalDescription(new RTCSessionDescription(ans),
           function() {
-              wsc.send(JSON.stringify({"cmd": "send", "roomid": "1", "clientid": clientId.toString(), "msg": JSON.stringify(ans) }));
+            sendWebSocketMsg(SEND_COMMAND, roomId, clientId, JSON.stringify(ans));
           },
           function(error) { console.log(error);}
       );
@@ -134,7 +168,7 @@ function createAndSendAnswer() {
 
 function onIceCandidateHandler(evt) {
   if (!evt || !evt.candidate) return;
-    wsc.send(JSON.stringify({"cmd": "send", "roomid": "1", "clientid": clientId.toString(), "msg": JSON.stringify(evt.candidate) }));
+    sendWebSocketMsg(SEND_COMMAND, roomId, clientId, JSON.stringify(evt.candidate));
 };
 
 function onAddStreamHandler(evt) {
@@ -144,9 +178,11 @@ function onAddStreamHandler(evt) {
   remoteVideoElem.srcObject = evt.stream;
 };
 
+/**
+ * This method ends undergoing call. Once called, It will end peer connection and stop all videos.
+ */
 function endCall() {
-    wsc.send(JSON.stringify({"cmd": "send", "roomid": "1", "clientid": clientId.toString(), "msg":
-        JSON.stringify(CLOSE_CONNECTION_FLAG) }));
+    sendWebSocketMsg("send", roomId, clientId, JSON.stringify(CLOSE_CONNECTION_FLAG));
     peerConn.close();
     peerConn = null;
     endCallButton.setAttribute("disabled", true);
@@ -157,4 +193,9 @@ function endCall() {
         localVideoElem.src = "";
     }
     if (remoteVideoElem) remoteVideoElem.src = "";
+    wsc.close();
 };
+
+function sendWebSocketMsg(command, roomId, clientId, msg) {
+    wsc.send(JSON.stringify({"cmd": command, "roomid": roomId, "clientid": clientId, "msg": msg }));
+}
