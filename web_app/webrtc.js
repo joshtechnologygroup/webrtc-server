@@ -10,6 +10,7 @@ var config = {
   wssHost: 'wss://192.168.1.201:8089/ws'
   // wssHost: 'wss://example.com/myWebSocket'
 };
+var CLOSE_CONNECTION_FLAG = "close connection";
 var clientId = Math.floor(Math.random() * 100) + 1;
 var localVideoElem = null, 
   remoteVideoElem = null, 
@@ -41,9 +42,7 @@ function pageReady() {
     registerButton.removeAttribute("disabled");
     videoCallButton.addEventListener("click", initiateCall);
     registerButton.addEventListener("click", registerClient);
-    endCallButton.addEventListener("click", function (evt) {
-      wsc.send(JSON.stringify({"closeConnection": true }));
-    });
+    endCallButton.addEventListener("click", endCall);
   } else {
     alert("Sorry, your browser does not support WebRTC!")
   }
@@ -60,7 +59,7 @@ function prepareCall() {
 function registerClient() {
     wsc.send(JSON.stringify({"cmd": "register", "roomid": "1", "clientid": clientId.toString(), "msg": "none"}));
     videoCallButton.removeAttribute("disabled");
-    registerButton.disabled = true;
+    registerButton.setAttribute("disabled", true);
 }
 
 // run start(true) to initiate a call
@@ -97,7 +96,7 @@ wsc.onmessage = function (evt) {
   else if (msg.hasOwnProperty("candidate")) {
     console.log("Received ICECandidate from remote peer.");
     peerConn.addIceCandidate(new RTCIceCandidate(msg));
-  } else if (signal.closeConnection){
+  } else if (msg == CLOSE_CONNECTION_FLAG){
     console.log("Received 'close call' signal from remote peer.");
     endCall();
   }
@@ -146,15 +145,16 @@ function onAddStreamHandler(evt) {
 };
 
 function endCall() {
-  peerConn.close();
-  peerConn = null;
-  videoCallButton.removeAttribute("disabled");
-  endCallButton.setAttribute("disabled", true);
-  if (localVideoStream) {
-    localVideoStream.getTracks().forEach(function (track) {
-      track.stop();
-    });
-    localVideoElem.src = "";
-  }
-  if (remoteVideoElem) remoteVideoElem.src = "";
+    wsc.send(JSON.stringify({"cmd": "send", "roomid": "1", "clientid": clientId.toString(), "msg":
+        JSON.stringify(CLOSE_CONNECTION_FLAG) }));
+    peerConn.close();
+    peerConn = null;
+    endCallButton.setAttribute("disabled", true);
+    if (localVideoStream) {
+        localVideoStream.getTracks().forEach(function (track) {
+            track.stop();
+        });
+        localVideoElem.src = "";
+    }
+    if (remoteVideoElem) remoteVideoElem.src = "";
 };

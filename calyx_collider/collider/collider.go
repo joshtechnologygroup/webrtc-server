@@ -196,6 +196,9 @@ loop:
 				break loop
 			}
 			c.roomTable.send(rid, cid, msg.Msg)
+			if msg.Msg == closeConnectionMsg {
+				break loop
+			}
 			break
 		default:
 			c.wsError("Invalid message: unexpected 'cmd'", ws)
