@@ -10,6 +10,7 @@ import (
 	"io"
 )
 
+const closeConnectionMsg  = "\"close connection\""
 // WebSocket message from the client.
 type wsClientMsg struct {
 	Cmd      string `json:"cmd"`
