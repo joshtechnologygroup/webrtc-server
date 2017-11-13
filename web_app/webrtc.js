@@ -6,22 +6,22 @@ window.RTCSessionDescription = window.RTCSessionDescription || window.mozRTCSess
 window.SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition || window.mozSpeechRecognition 
   || window.msSpeechRecognition || window.oSpeechRecognition;
 
-const peerConfig = {
-    'iceServers': [
-        {'url': 'stun:stun.l.google.com:19302'},
-        {
-            url: 'turn:192.158.29.39:3478?transport=tcp',
-            credential: 'JZEOEt2V3Qb0y27GRntt2u2PAYA=',
-            username: '28224511:1379330808'
-        }
-    ]
-};
-const CLOSE_CONNECTION_FLAG = "close connection";
-const SEND_COMMAND = "send";
-const REGISTER_COMMAND = "register";
-
 
 function WebRTCCall (webSocketUrl, localVideoElementId, remoteVideoElementId){
+    const peerConfig = {
+        'iceServers': [
+            {'url': 'stun:stun.l.google.com:19302'},
+            {
+                url: 'turn:192.158.29.39:3478?transport=tcp',
+                credential: 'JZEOEt2V3Qb0y27GRntt2u2PAYA=',
+                username: '28224511:1379330808'
+            }
+        ]
+    };
+    const CLOSE_CONNECTION_FLAG = "close connection";
+    const SEND_COMMAND = "send";
+    const REGISTER_COMMAND = "register";
+
     let webSocketConfig = null;
     let wsc = null;
     let clientId = null;
@@ -30,6 +30,7 @@ function WebRTCCall (webSocketUrl, localVideoElementId, remoteVideoElementId){
     let localVideoElem = null;
     let remoteVideoElem = null;
     let localVideoStream = null;
+
     if(navigator.getUserMedia) {
         webSocketConfig = webSocketUrl;
         localVideoElem = document.getElementById(localVideoElementId);
@@ -38,24 +39,29 @@ function WebRTCCall (webSocketUrl, localVideoElementId, remoteVideoElementId){
         throw new Error("Browser does not support WebRTC");
     }
 
+    /**
+     * This method creates connection to signaling server, registers given user in given room.
+     * Then it checks, if it is first user in that room or not. If it is, then it will create an offer message and send
+     * it to signalling server for other users to recieve it.
+     * If there is already a user in that room, Then it will end and javascript will wait till it receives an offer
+     * message.
+     *
+     * @param room Room in which all users will connect, It will be unique to a group of clients present in same call.
+     * @param userId Unique id of a user in a call.
+     */
     this.initiateCall = function (room, userId) {
         roomId = room;
         clientId = userId;
         setUpWebSocket(webSocketConfig);
     };
 
+    /**
+     * This method ends all connections related to this call. It will also stop video stream on local and send
+     * a message to all other clients to kill their connections as well.
+     */
     this.endCall = function() {
         sendWebSocketMsg("send", JSON.stringify(CLOSE_CONNECTION_FLAG));
-        peerConn.close();
-        peerConn = null;
-        if (localVideoStream) {
-            localVideoStream.getTracks().forEach(function (track) {
-                track.stop();
-            });
-            localVideoElem.src = "";
-        }
-        if (remoteVideoElem) remoteVideoElem.src = "";
-        wsc.close();
+        endLocalCall();
     };
 
     let setUpWebSocket = function(webSocketConfig) {
@@ -68,23 +74,43 @@ function WebRTCCall (webSocketUrl, localVideoElementId, remoteVideoElementId){
         wsc.send(JSON.stringify({"cmd": command, "roomid": roomId, "clientid": clientId, "msg": msg }));
     };
 
+    let getClientCount = function (callback) {
+        let xmlHttp = new XMLHttpRequest();
+
+        xmlHttp.onreadystatechange = function() {
+            if (xmlHttp.readyState === XMLHttpRequest.DONE) {
+                if (xmlHttp.status === 200) {
+                    callback(xmlHttp.responseText);
+                }
+                else if (xmlHttp.status === 400) {
+                    throw new Error('There was an error 400');
+                }
+                else {
+                    throw new Error('something else other than 200 was returned while counting clients');
+                }
+            }
+        };
+        xmlHttp.open("GET", "../status?rid=" + roomId, true);
+        xmlHttp.send();
+    };
+
     let startCall = function () {
         sendWebSocketMsg(REGISTER_COMMAND, "none");
-        setTimeout(function() {
-            if (peerConn === null) {
+        getClientCount(function (numberOfClients) {
+            if (numberOfClients < 2 && peerConn === null) {
                 prepareCall();
+                // get the local stream, show it in the local video element and send it
                 navigator.getUserMedia({ "audio": true, "video": true }, function (stream) {
                     localVideoStream = stream;
                     localVideoElem.srcObject = localVideoStream;
                     peerConn.addStream(localVideoStream);
                     createAndSendOffer();
                 }, function(error) {
+                    endLocalCall();
                     throw error;
                 });
             }
-        }, 3000);
-        // get the local stream, show it in the local video element and send it
-
+        });
     };
 
     let prepareCall = function() {
@@ -108,9 +134,9 @@ function WebRTCCall (webSocketUrl, localVideoElementId, remoteVideoElementId){
         else if (msg.hasOwnProperty("candidate")) {
             console.log("Received ICECandidate from remote peer.");
             peerConn.addIceCandidate(new RTCIceCandidate(msg));
-        } else if (msg == CLOSE_CONNECTION_FLAG){
+        } else if (msg === CLOSE_CONNECTION_FLAG){
             console.log("Received 'close call' signal from remote peer.");
-            endCall();
+            endLocalCall();
         }
     };
 
@@ -122,7 +148,10 @@ function WebRTCCall (webSocketUrl, localVideoElementId, remoteVideoElementId){
             localVideoElem.srcObject = localVideoStream;
             peerConn.addStream(localVideoStream);
             createAndSendAnswer();
-        }, function(error) { console.log(error);});
+        }, function(error) {
+            endLocalCall();
+            throw error;
+        });
     };
 
     let createAndSendOffer = function() {
@@ -133,10 +162,16 @@ function WebRTCCall (webSocketUrl, localVideoElementId, remoteVideoElementId){
                     function() {
                         sendWebSocketMsg(SEND_COMMAND, JSON.stringify(off));
                     },
-                    function(error) { console.log(error);}
+                    function(error) {
+                        endLocalCall();
+                        throw error;
+                    }
                 );
             },
-            function (error) { console.log(error);}
+            function (error) {
+                endLocalCall();
+                throw error;
+            }
         );
     };
 
@@ -148,10 +183,16 @@ function WebRTCCall (webSocketUrl, localVideoElementId, remoteVideoElementId){
                     function() {
                         sendWebSocketMsg(SEND_COMMAND, JSON.stringify(ans));
                     },
-                    function(error) { console.log(error);}
+                    function(error) {
+                        endLocalCall();
+                        throw error;
+                    }
                 );
             },
-            function (error) {console.log(error);}
+            function (error) {
+                endLocalCall();
+                throw error;
+            }
         );
     };
 
@@ -164,5 +205,20 @@ function WebRTCCall (webSocketUrl, localVideoElementId, remoteVideoElementId){
         // set remote video stream as source for remote video HTML5 element
         remoteVideoElem.srcObject = evt.stream;
     };
+
+    let endLocalCall = function () {
+        if (peerConn) {
+            peerConn.close();
+            peerConn = null;
+        }
+        if (localVideoStream) {
+            localVideoStream.getTracks().forEach(function (track) {
+                track.stop();
+            });
+            localVideoElem.src = "";
+        }
+        if (remoteVideoElem) remoteVideoElem.src = "";
+        wsc.close();
+    }
 
 }

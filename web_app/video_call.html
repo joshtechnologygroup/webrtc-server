@@ -31,14 +31,19 @@
         endCallButton = document.getElementById("endCallButton");
         localVideoElem = document.getElementById('localVideo');
         remoteVideoElem = document.getElementById('remoteVideo');
+
+        webRTCCall = new WebRTCCall(config.wssHost, "localVideo", "remoteVideo");
         videoCallButton.addEventListener("click", function() {
             videoCallButton.setAttribute("disabled", true);
             endCallButton.removeAttribute("disabled");
             webRTCCall.initiateCall(queryParams["roomId"], queryParams["clientId"]);
         });
         videoCallButton.removeAttribute("disabled");
-        webRTCCall = new WebRTCCall(config.wssHost, "localVideo", "remoteVideo");
-        endCallButton.addEventListener("click", webRTCCall.endCall);
+        endCallButton.addEventListener("click", function() {
+            webRTCCall.endCall();
+            videoCallButton.removeAttribute("disabled");
+            endCallButton.setAttribute("disabled", true);
+        });
         
     });
 </script>
