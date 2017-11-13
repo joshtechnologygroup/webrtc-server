@@ -6,31 +6,10 @@ window.RTCSessionDescription = window.RTCSessionDescription || window.mozRTCSess
 window.SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition || window.mozSpeechRecognition 
   || window.msSpeechRecognition || window.oSpeechRecognition;
 
-var config = {
-  wssHost: 'wss://192.168.1.201:8089/ws'
-};
-var CLOSE_CONNECTION_FLAG = "close connection";
-var SEND_COMMAND = "send";
-var REGISTER_COMMAND = "register";
 
-var clientId = null;
-var roomId = null;
-var wsc = null;
-var peerConn = null;
-var localVideoElem = null;
-var remoteVideoElem = null;
-var localVideoStream = null;
-var videoCallButton = null;
-var endCallButton = null;
-
-function setUpWebSocket() {
-    wsc = new WebSocket(config.wssHost);
-    wsc.onmessage = webSocketMessageReceiver;
-}
-
-function getPeerConfig() {
-    return {'iceServers':
-        [
+function WebRTCCall (webSocketUrl, localVideoElementId, remoteVideoElementId){
+    const peerConfig = {
+        'iceServers': [
             {'url': 'stun:stun.l.google.com:19302'},
             {
                 url: 'turn:192.158.29.39:3478?transport=tcp',
@@ -39,163 +18,207 @@ function getPeerConfig() {
             }
         ]
     };
-}
-    
-function testPageReady() {
-  // check browser WebRTC availability 
-  if(navigator.getUserMedia) {
-    videoCallButton = document.getElementById("videoCallButton");
-    endCallButton = document.getElementById("endCallButton");
-    localVideoElem = document.getElementById('localVideo');
-    remoteVideoElem = document.getElementById('remoteVideo');
-    videoCallButton.addEventListener("click", initiateCall);
-    videoCallButton.removeAttribute("disabled");
-    setUpWebSocket();
-    wsc.onopen = function () {
-        registerClientInRoom("1", (Math.floor(Math.random() * 100) + 1).toString());
-    };
-    endCallButton.addEventListener("click", endCall);
-  } else {
-    alert("Sorry, your browser does not support WebRTC!")
-  }
-};
+    const CLOSE_CONNECTION_FLAG = "close connection";
+    const SEND_COMMAND = "send";
+    const REGISTER_COMMAND = "register";
 
-/**
- * This method does initial setup of client in room. This method must be called before any other method in this file.
- *
- * @param roomId Room in which call will take place. Group of people attending same call will be in same room.
- * @param clientId Unique id of each person attending the call.
- * @throws Error, If browser being used doesn't support WebRTC.
- */
-function setupClient(roomId, clientId) {
+    let webSocketConfig = null;
+    let wsc = null;
+    let clientId = null;
+    let roomId = null;
+    let peerConn = null;
+    let localVideoElem = null;
+    let remoteVideoElem = null;
+    let localVideoStream = null;
+
     if(navigator.getUserMedia) {
-        localVideoElem = document.getElementById('localVideo');
-        remoteVideoElem = document.getElementById('remoteVideo');
-        setUpWebSocket();
-        wsc.onopen = function () {
-            registerClientInRoom(roomId, clientId);
-        };
+        webSocketConfig = webSocketUrl;
+        localVideoElem = document.getElementById(localVideoElementId);
+        remoteVideoElem = document.getElementById(remoteVideoElementId);
     } else {
         throw new Error("Browser does not support WebRTC");
     }
-}
 
-function registerClientInRoom(roomName, clientIdString) {
-    roomId = roomName;
-    clientId = clientIdString;
-    sendWebSocketMsg(REGISTER_COMMAND, roomId, clientId, "none");
-}
+    /**
+     * This method creates connection to signaling server, registers given user in given room.
+     * Then it checks, if it is first user in that room or not. If it is, then it will create an offer message and send
+     * it to signalling server for other users to recieve it.
+     * If there is already a user in that room, Then it will end and javascript will wait till it receives an offer
+     * message.
+     *
+     * @param room Room in which all users will connect, It will be unique to a group of clients present in same call.
+     * @param userId Unique id of a user in a call.
+     */
+    this.initiateCall = function (room, userId) {
+        roomId = room;
+        clientId = userId;
+        setUpWebSocket(webSocketConfig);
+    };
 
-function prepareCall() {
-    peerConn = new RTCPeerConnection(getPeerConfig());
-    // send any ice candidates to the other peer
-    peerConn.onicecandidate = onIceCandidateHandler;
-    // once remote stream arrives, show it in the remote video element
-    peerConn.onaddstream = onAddStreamHandler;
-};
+    /**
+     * This method ends all connections related to this call. It will also stop video stream on local and send
+     * a message to all other clients to kill their connections as well.
+     */
+    this.endCall = function() {
+        sendWebSocketMsg("send", JSON.stringify(CLOSE_CONNECTION_FLAG));
+        endLocalCall();
+    };
 
-/**
- * This method starts video call. It must be called after setupClient.
- */
-function initiateCall() {
-  prepareCall();
-  // get the local stream, show it in the local video element and send it
-  navigator.getUserMedia({ "audio": true, "video": true }, function (stream) {
-    localVideoStream = stream;
-    localVideoElem.srcObject = localVideoStream;
-    peerConn.addStream(localVideoStream);
-    createAndSendOffer();
-  }, function(error) { console.log(error);});
-};
+    let setUpWebSocket = function(webSocketConfig) {
+        wsc = new WebSocket(webSocketConfig);
+        wsc.onmessage = webSocketMessageReceiver;
+        wsc.onopen = startCall;
+    };
 
-function answerCall() {
-  prepareCall();
-  // get the local stream, show it in the local video element and send it
-  navigator.getUserMedia({ "audio": true, "video": true }, function (stream) {
-    localVideoStream = stream;
-    localVideoElem.srcObject = localVideoStream;
-    peerConn.addStream(localVideoStream);
-    createAndSendAnswer();
-  }, function(error) { console.log(error);});
-};
+    let sendWebSocketMsg = function(command, msg) {
+        wsc.send(JSON.stringify({"cmd": command, "roomid": roomId, "clientid": clientId, "msg": msg }));
+    };
 
-function webSocketMessageReceiver(evt) {
-  if (!peerConn) answerCall();
-  var signal = JSON.parse(evt.data);
-  var msg = JSON.parse(signal.msg);
-  if (msg.hasOwnProperty("sdp")) {
-    console.log("Received SDP from remote peer.");
-    peerConn.setRemoteDescription(new RTCSessionDescription(msg));
-  }
-  else if (msg.hasOwnProperty("candidate")) {
-    console.log("Received ICECandidate from remote peer.");
-    peerConn.addIceCandidate(new RTCIceCandidate(msg));
-  } else if (msg == CLOSE_CONNECTION_FLAG){
-    console.log("Received 'close call' signal from remote peer.");
-    endCall();
-  }
-};
+    let getClientCount = function (callback) {
+        let xmlHttp = new XMLHttpRequest();
 
-function createAndSendOffer() {
-  peerConn.createOffer(
-    function (offer) {
-      var off = new RTCSessionDescription(offer);
-      peerConn.setLocalDescription(new RTCSessionDescription(off),
-          function() {
-            sendWebSocketMsg(SEND_COMMAND, roomId, clientId, JSON.stringify(off));
-          },
-          function(error) { console.log(error);}
-      );
-    }, 
-    function (error) { console.log(error);}
-  );
-};
+        xmlHttp.onreadystatechange = function() {
+            if (xmlHttp.readyState === XMLHttpRequest.DONE) {
+                if (xmlHttp.status === 200) {
+                    callback(xmlHttp.responseText);
+                }
+                else if (xmlHttp.status === 400) {
+                    throw new Error('There was an error 400');
+                }
+                else {
+                    throw new Error('something else other than 200 was returned while counting clients');
+                }
+            }
+        };
+        xmlHttp.open("GET", "../status?rid=" + roomId, true);
+        xmlHttp.send();
+    };
 
-function createAndSendAnswer() {
-  peerConn.createAnswer(
-    function (answer) {
-      var ans = new RTCSessionDescription(answer);
-      peerConn.setLocalDescription(new RTCSessionDescription(ans),
-          function() {
-            sendWebSocketMsg(SEND_COMMAND, roomId, clientId, JSON.stringify(ans));
-          },
-          function(error) { console.log(error);}
-      );
-    },
-    function (error) {console.log(error);}
-  );
-};
-
-function onIceCandidateHandler(evt) {
-  if (!evt || !evt.candidate) return;
-    sendWebSocketMsg(SEND_COMMAND, roomId, clientId, JSON.stringify(evt.candidate));
-};
-
-function onAddStreamHandler(evt) {
-  videoCallButton.setAttribute("disabled", true);
-  endCallButton.removeAttribute("disabled"); 
-  // set remote video stream as source for remote video HTML5 element
-  remoteVideoElem.srcObject = evt.stream;
-};
-
-/**
- * This method ends undergoing call. Once called, It will end peer connection and stop all videos.
- */
-function endCall() {
-    sendWebSocketMsg("send", roomId, clientId, JSON.stringify(CLOSE_CONNECTION_FLAG));
-    peerConn.close();
-    peerConn = null;
-    endCallButton.setAttribute("disabled", true);
-    if (localVideoStream) {
-        localVideoStream.getTracks().forEach(function (track) {
-            track.stop();
+    let startCall = function () {
+        sendWebSocketMsg(REGISTER_COMMAND, "none");
+        getClientCount(function (numberOfClients) {
+            if (numberOfClients < 2 && peerConn === null) {
+                prepareCall();
+                // get the local stream, show it in the local video element and send it
+                navigator.getUserMedia({ "audio": true, "video": true }, function (stream) {
+                    localVideoStream = stream;
+                    localVideoElem.srcObject = localVideoStream;
+                    peerConn.addStream(localVideoStream);
+                    createAndSendOffer();
+                }, function(error) {
+                    endLocalCall();
+                    throw error;
+                });
+            }
         });
-        localVideoElem.src = "";
-    }
-    if (remoteVideoElem) remoteVideoElem.src = "";
-    wsc.close();
-};
+    };
 
-function sendWebSocketMsg(command, roomId, clientId, msg) {
-    wsc.send(JSON.stringify({"cmd": command, "roomid": roomId, "clientid": clientId, "msg": msg }));
+    let prepareCall = function() {
+        peerConn = new RTCPeerConnection(peerConfig);
+        // send any ice candidates to the other peer
+        peerConn.onicecandidate = onIceCandidateHandler;
+        // once remote stream arrives, show it in the remote video element
+        peerConn.onaddstream = onAddStreamHandler;
+    };
+
+    let webSocketMessageReceiver = function(evt) {
+        if (!peerConn) {
+            answerCall();
+        }
+        let signal = JSON.parse(evt.data);
+        let msg = JSON.parse(signal.msg);
+        if (msg.hasOwnProperty("sdp")) {
+            console.log("Received SDP from remote peer.");
+            peerConn.setRemoteDescription(new RTCSessionDescription(msg));
+        }
+        else if (msg.hasOwnProperty("candidate")) {
+            console.log("Received ICECandidate from remote peer.");
+            peerConn.addIceCandidate(new RTCIceCandidate(msg));
+        } else if (msg === CLOSE_CONNECTION_FLAG){
+            console.log("Received 'close call' signal from remote peer.");
+            endLocalCall();
+        }
+    };
+
+    let answerCall = function() {
+        prepareCall();
+        // get the local stream, show it in the local video element and send it
+        navigator.getUserMedia({ "audio": true, "video": true }, function (stream) {
+            localVideoStream = stream;
+            localVideoElem.srcObject = localVideoStream;
+            peerConn.addStream(localVideoStream);
+            createAndSendAnswer();
+        }, function(error) {
+            endLocalCall();
+            throw error;
+        });
+    };
+
+    let createAndSendOffer = function() {
+        peerConn.createOffer(
+            function (offer) {
+                let off = new RTCSessionDescription(offer);
+                peerConn.setLocalDescription(new RTCSessionDescription(off),
+                    function() {
+                        sendWebSocketMsg(SEND_COMMAND, JSON.stringify(off));
+                    },
+                    function(error) {
+                        endLocalCall();
+                        throw error;
+                    }
+                );
+            },
+            function (error) {
+                endLocalCall();
+                throw error;
+            }
+        );
+    };
+
+    let createAndSendAnswer = function() {
+        peerConn.createAnswer(
+            function (answer) {
+                let ans = new RTCSessionDescription(answer);
+                peerConn.setLocalDescription(new RTCSessionDescription(ans),
+                    function() {
+                        sendWebSocketMsg(SEND_COMMAND, JSON.stringify(ans));
+                    },
+                    function(error) {
+                        endLocalCall();
+                        throw error;
+                    }
+                );
+            },
+            function (error) {
+                endLocalCall();
+                throw error;
+            }
+        );
+    };
+
+    let onIceCandidateHandler = function(evt) {
+        if (!evt || !evt.candidate) return;
+        sendWebSocketMsg(SEND_COMMAND, JSON.stringify(evt.candidate));
+    };
+
+    let onAddStreamHandler = function(evt) {
+        // set remote video stream as source for remote video HTML5 element
+        remoteVideoElem.srcObject = evt.stream;
+    };
+
+    let endLocalCall = function () {
+        if (peerConn) {
+            peerConn.close();
+            peerConn = null;
+        }
+        if (localVideoStream) {
+            localVideoStream.getTracks().forEach(function (track) {
+                track.stop();
+            });
+            localVideoElem.src = "";
+        }
+        if (remoteVideoElem) remoteVideoElem.src = "";
+        wsc.close();
+    }
+
 }

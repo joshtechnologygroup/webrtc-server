@@ -9,7 +9,6 @@ package collider
 import (
 	"crypto/tls"
 	"golang.org/x/net/websocket"
-	//"github.com/gorilla/websocket"
 	"encoding/json"
 	"errors"
 	"html"
@@ -82,12 +81,18 @@ func (c *Collider) httpStatusHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Add("Access-Control-Allow-Origin", "*")
 	w.Header().Add("Access-Control-Allow-Methods", "GET")
 
-	rp := c.dash.getReport(c.roomTable)
 	enc := json.NewEncoder(w)
-	if err := enc.Encode(rp); err != nil {
-		err = errors.New("Failed to encode to JSON: err=" + err.Error())
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		c.dash.onHttpErr(err)
+	rids, ok := r.URL.Query()["rid"]
+	if !ok || len(rids) < 1 {
+		rp := c.dash.getReport(c.roomTable)
+		if err := enc.Encode(rp); err != nil {
+			err = errors.New("Failed to encode to JSON: err=" + err.Error())
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			c.dash.onHttpErr(err)
+		}
+	} else {
+		clientList := c.roomTable.room(rids[0]).clients
+		enc.Encode(len(clientList))
 	}
 }
 
@@ -127,7 +132,7 @@ func (c *Collider) httpHandler(w http.ResponseWriter, r *http.Request) {
 	case "DELETE":
 		c.roomTable.remove(rid, cid)
 	case "GET":
-		var basePath = os.Getenv("GOPATH") + "/src/web_app/";
+		var basePath = os.Getenv("GOPATH") + "/src/web_app/"
 		if cid == "webrtc.js" {
 			http.ServeFile(w, r, basePath + "webrtc.js")
 		}
