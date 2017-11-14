@@ -1,51 +1,56 @@
-<!DOCTYPE html>
-<html>
-<head>
-    <script src="./webrtc.js"></script>
-    <title>WebRTC Audio/Video-Chat</title>
-</head>
-
-<body>
-<h4>Video call page</h4>
-<video id="remoteVideo" autoplay></video>
-<video id="localVideo" autoplay muted></video>
+<script src="https://ec2-52-23-163-175.compute-1.amazonaws.com:8089/video_call/RTCMultiConnection.min.js"></script>
+<script src="https://ec2-52-23-163-175.compute-1.amazonaws.com:8089/video_call/socket.io.js"></script>
 <input id="videoCallButton" type="button" disabled value="Video Call"/>
 <input id="endCallButton" type="button" disabled value="End Call"/>
-<script type="text/javascript">
-    let videoCallButton = null;
-    let endCallButton = null;
-    let localVideoElem = null;
-    let remoteVideoElem = null;
-    let webRTCCall = null;
+<script>
     function getQueryParams() {
         let queryDict = {};
         location.search.substr(1).split("&").forEach(function(item) {queryDict[item.split("=")[0]] = item.split("=")[1]});
         return queryDict;
     }
-    window.addEventListener("load", function () {
-        const config = {
-            wssHost: 'wss://192.168.1.201:8089/ws'
-        };
-        let queryParams = getQueryParams();
-        videoCallButton = document.getElementById("videoCallButton");
-        endCallButton = document.getElementById("endCallButton");
-        localVideoElem = document.getElementById('localVideo');
-        remoteVideoElem = document.getElementById('remoteVideo');
 
-        webRTCCall = new WebRTCCall(config.wssHost, "localVideo", "remoteVideo");
-        videoCallButton.addEventListener("click", function() {
-            videoCallButton.setAttribute("disabled", true);
-            endCallButton.removeAttribute("disabled");
-            webRTCCall.initiateCall(queryParams["roomId"], queryParams["clientId"]);
-        });
-        videoCallButton.removeAttribute("disabled");
-        endCallButton.addEventListener("click", function() {
-            webRTCCall.endCall();
-            videoCallButton.removeAttribute("disabled");
-            endCallButton.setAttribute("disabled", true);
-        });
-        
+    let videoCallButton = document.getElementById("videoCallButton");
+    let endCallButton = document.getElementById("endCallButton");
+
+    videoCallButton.removeAttribute("disabled");
+
+    let queryParams = getQueryParams();
+    let connection = new RTCMultiConnection();
+
+    // this line is VERY_important
+    connection.socketURL = 'https://ec2-52-23-163-175.compute-1.amazonaws.com:443/';
+    connection.autoCloseEntireSession = true;
+
+    // if you want audio+video conferencing
+    connection.session = {
+        audio: true,
+        video: true
+    };
+
+    connection.sdpConstraints.mandatory = {
+        OfferToReceiveAudio: true,
+        OfferToReceiveVideo: true
+    };
+
+    let roomid = queryParams["roomId"];
+
+    videoCallButton.addEventListener("click", function() {
+        videoCallButton.setAttribute("disabled", true);
+        endCallButton.removeAttribute("disabled");
+        connection.openOrJoin(roomid);
     });
+
+    endCallButton.addEventListener("click", function() {
+        endCallButton.setAttribute("disabled", true);
+        videoCallButton.removeAttribute("disabled");
+        connection.disconnect();
+    });
+
+    connection.onleave = function(e) {
+        if (e.userid === roomid) {
+            connection.disconnect();
+            connection.openOrJoin(roomid);
+        }
+    };
+
 </script>
-</body>
-</html>

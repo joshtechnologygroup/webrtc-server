@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <script src="./webrtc.js"></script>
+    <title>WebRTC Audio/Video-Chat</title>
+</head>
+
+<body>
+<h4>Video call page</h4>
+<video id="remoteVideo" autoplay></video>
+<video id="localVideo" autoplay muted></video>
+<input id="videoCallButton" type="button" disabled value="Video Call"/>
+<input id="endCallButton" type="button" disabled value="End Call"/>
+<script type="text/javascript">
+    let videoCallButton = null;
+    let endCallButton = null;
+    let localVideoElem = null;
+    let remoteVideoElem = null;
+    let webRTCCall = null;
+    function getQueryParams() {
+        let queryDict = {};
+        location.search.substr(1).split("&").forEach(function(item) {queryDict[item.split("=")[0]] = item.split("=")[1]});
+        return queryDict;
+    }
+    window.addEventListener("load", function () {
+        const config = {
+            wssHost: 'wss://192.168.1.201:8089/ws'
+        };
+        let queryParams = getQueryParams();
+        videoCallButton = document.getElementById("videoCallButton");
+        endCallButton = document.getElementById("endCallButton");
+        localVideoElem = document.getElementById('localVideo');
+        remoteVideoElem = document.getElementById('remoteVideo');
+
+        webRTCCall = new WebRTCCall(config.wssHost, "localVideo", "remoteVideo");
+        videoCallButton.addEventListener("click", function() {
+            videoCallButton.setAttribute("disabled", true);
+            endCallButton.removeAttribute("disabled");
+            webRTCCall.initiateCall(queryParams["roomId"], queryParams["clientId"]);
+        });
+        videoCallButton.removeAttribute("disabled");
+        endCallButton.addEventListener("click", function() {
+            webRTCCall.endCall();
+            videoCallButton.removeAttribute("disabled");
+            endCallButton.setAttribute("disabled", true);
+        });
+
+    });
+</script>
+</body>
+</html>

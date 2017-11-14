@@ -133,8 +133,8 @@ func (c *Collider) httpHandler(w http.ResponseWriter, r *http.Request) {
 		c.roomTable.remove(rid, cid)
 	case "GET":
 		var basePath = os.Getenv("GOPATH") + "/src/web_app/"
-		if cid == "webrtc.js" {
-			http.ServeFile(w, r, basePath + "webrtc.js")
+		if cid != "" {
+			http.ServeFile(w, r, basePath + cid)
 		}
 		http.ServeFile(w, r, basePath + "video_call.html")
 
