@@ -1,6 +1,6 @@
 <script src="https://ec2-52-23-163-175.compute-1.amazonaws.com:8089/video_call/RTCMultiConnection.min.js"></script>
 <script src="https://ec2-52-23-163-175.compute-1.amazonaws.com:8089/video_call/socket.io.js"></script>
-<input id="videoCallButton" type="button" disabled value="Video Call"/>
+<input id="videoCallButton" type="button" disabled value="Join Call"/>
 <input id="endCallButton" type="button" disabled value="End Call"/>
 <script>
     function getQueryParams() {
@@ -19,7 +19,7 @@
 
     // this line is VERY_important
     connection.socketURL = 'https://ec2-52-23-163-175.compute-1.amazonaws.com:443/';
-    connection.autoCloseEntireSession = true;
+    connection.autoCloseEntireSession = false;
 
     // if you want audio+video conferencing
     connection.session = {
@@ -41,16 +41,31 @@
     });
 
     endCallButton.addEventListener("click", function() {
+        endCall();
         endCallButton.setAttribute("disabled", true);
         videoCallButton.removeAttribute("disabled");
-        connection.disconnect();
     });
 
     connection.onleave = function(e) {
         if (e.userid === roomid) {
-            connection.disconnect();
-            connection.openOrJoin(roomid);
+            endCall();
+
+            if (confirm("Initiator ended the call. Do you wish to restart this call?") === true) {
+                connection.openOrJoin(roomid);
+            }
+            else {
+                endCallButton.setAttribute("disabled", true);
+                videoCallButton.removeAttribute("disabled");
+            }
         }
     };
+
+    function endCall() {
+        connection.leave();
+        connection.attachStreams.forEach(function(stream) {
+            stream.stop(); // optional
+        });
+        connection.closeSocket(); // strongly recommended
+    }
 
 </script>
